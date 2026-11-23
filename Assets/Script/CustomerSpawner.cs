@@ -1,72 +1,118 @@
 using UnityEngine;
-using System.Collections.Generic;
+using System.Collections;
 
 public class CustomerSpawner : MonoBehaviour {
-    public GameObject[] customerPrefabs; 
-    public Transform[] titikMuncul; 
-    public Transform[] titikAntrean; 
-    
-    [Header("Pengaturan Waktu Muncul (Detik)")]
-    public float waktuMinimum = 3f; 
-    public float waktuMaksimum = 7f; 
+    [Header("Referensi Prefab & Slot")]
+    public GameObject[] prefabPelanggan;
+    public Transform[] titikSlotPelanggan;
+    public float jarakSpawnLuarLayar = 12f;
 
-    private float timer;
     private bool[] slotTerisi;
+    private int kuotaTotalHariIni = 10;
+    private int maxPelangganBersamaan = 1;
+    private int sudahSpawn = 0;
+    private int pelangganAktif = 0;
+    private float jedaSpawn = 3f;
+    private float kesabaranHariIni = 25f;
+    private bool hariSelesaiDipicu = false;
 
     void Start() {
-        timer = 1.5f; 
-        slotTerisi = new bool[titikAntrean.Length];
+        slotTerisi = new bool[titikSlotPelanggan.Length];
+        maxPelangganBersamaan = Mathf.Max(1, titikSlotPelanggan.Length);
+
+        if (GameManager.instance != null) {
+            PengaturanHari hari = GameManager.instance.AmbilHariIni();
+            kuotaTotalHariIni = hari.TotalPelangganDatang;
+            jedaSpawn = hari.jedaSpawnPelanggan;
+            kesabaranHariIni = hari.kesabaranPelanggan;
+
+            int batasHariIni = hari.maxPelangganBersamaan > 0 ? hari.maxPelangganBersamaan : 1;
+            maxPelangganBersamaan = Mathf.Clamp(batasHariIni, 1, titikSlotPelanggan.Length);
+        }
+
+        StartCoroutine(LoopSpawnPelanggan());
     }
 
-    void Update() {
-        // Jangan munculkan pelanggan jika shift hari sudah berakhir
-        if (GameManager.instance != null && !GameManager.instance.shiftAktif) return;
+    IEnumerator LoopSpawnPelanggan() {
+        yield return new WaitForSeconds(1f);
 
-        timer -= Time.deltaTime;
-        if (timer <= 0) {
-            MunculkanPelanggan();
-            timer = Random.Range(waktuMinimum, waktuMaksimum); 
+        while (sudahSpawn < kuotaTotalHariIni) {
+            if (pelangganAktif < maxPelangganBersamaan) {
+                int slotKosong = CariSlotKosong();
+                if (slotKosong != -1) {
+                    SpawnDiSlot(slotKosong);
+                    yield return new WaitForSeconds(jedaSpawn);
+                    continue;
+                }
+            }
+            yield return new WaitForSeconds(0.5f);
         }
     }
 
-    void MunculkanPelanggan() {
-        // Hitung berapa pelanggan yang sedang ada di meja sekarang
-        int pelangganAktif = 0;
-        List<int> slotKosong = new List<int>();
+    int CariSlotKosong() {
+        // Jika batas hari ini cuma 1 pelanggan, taruh di slot paling tengah
+        if (maxPelangganBersamaan == 1 && titikSlotPelanggan.Length > 0) {
+            int slotTengah = -1;
+            float jarakTerkecilKeTengah = float.MaxValue;
+
+            for (int i = 0; i < slotTerisi.Length; i++) {
+                if (!slotTerisi[i]) {
+                    float jarakX = Mathf.Abs(titikSlotPelanggan[i].position.x);
+                    if (jarakX < jarakTerkecilKeTengah) {
+                        jarakTerkecilKeTengah = jarakX;
+                        slotTengah = i;
+                    }
+                }
+            }
+            if (slotTengah != -1) return slotTengah;
+        }
 
         for (int i = 0; i < slotTerisi.Length; i++) {
-            if (slotTerisi[i]) pelangganAktif++;
-            else slotKosong.Add(i);
+            if (!slotTerisi[i]) return i;
         }
+        return -1;
+    }
 
-        // Cek batas maksimal pelanggan bersamaan hari ini dari GameManager
-        int batasPelanggan = 3;
-        if (GameManager.instance != null) {
-            batasPelanggan = GameManager.instance.AmbilHariIni().maxPelangganBersamaan;
-        }
+    void SpawnDiSlot(int indexSlot) {
+        if (prefabPelanggan == null || prefabPelanggan.Length == 0) return;
 
-        // Jika jumlah pelanggan di meja sudah mencapai batas hari ini (misal Hari 1 batasnya 1), tahan dulu!
-        if (pelangganAktif >= batasPelanggan) return;
+        slotTerisi[indexSlot] = true;
+        sudahSpawn++;
+        pelangganAktif++;
 
-        if (slotKosong.Count > 0) {
-            int randomIndex = Random.Range(0, slotKosong.Count);
-            int slotTerpilih = slotKosong[randomIndex];
+        Transform target = titikSlotPelanggan[indexSlot];
+        float spawnX = target.position.x < 0 ? -jarakSpawnLuarLayar : jarakSpawnLuarLayar;
+        Vector3 posisiAwal = new Vector3(spawnX, target.position.y, target.position.z);
 
-            int prefabAcak = Random.Range(0, customerPrefabs.Length);
-            int munculAcak = Random.Range(0, titikMuncul.Length);
+        GameObject prefabAcak = prefabPelanggan[Random.Range(0, prefabPelanggan.Length)];
+        GameObject obj = Instantiate(prefabAcak, posisiAwal, Quaternion.identity);
 
-            GameObject pelangganBaru = Instantiate(customerPrefabs[prefabAcak], titikMuncul[munculAcak].position, Quaternion.identity);
-            
-            Customer scriptPelanggan = pelangganBaru.GetComponent<Customer>();
-            scriptPelanggan.spawner = this; 
-            scriptPelanggan.slotIndex = slotTerpilih; 
-            scriptPelanggan.targetPosisi = titikAntrean[slotTerpilih].position; 
-
-            slotTerisi[slotTerpilih] = true;
+        Customer cust = obj.GetComponent<Customer>();
+        if (cust != null) {
+            cust.spawner = this;
+            cust.slotIndex = indexSlot;
+            cust.targetPosisi = target.position;
+            if (kesabaranHariIni > 0f) cust.kesabaran = kesabaranHariIni;
         }
     }
 
-    public void KosongkanSlot(int index) {
-        slotTerisi[index] = false;
+    public void KosongkanSlot(int indexSlot) {
+        if (indexSlot >= 0 && indexSlot < slotTerisi.Length) {
+            slotTerisi[indexSlot] = false;
+        }
+
+        pelangganAktif = Mathf.Max(0, pelangganAktif - 1);
+
+        if (sudahSpawn >= kuotaTotalHariIni && pelangganAktif <= 0 && !hariSelesaiDipicu) {
+            hariSelesaiDipicu = true;
+            StartCoroutine(TungguLaluAkhiriHari());
+        }
+    }
+
+    IEnumerator TungguLaluAkhiriHari() {
+        yield return new WaitForSeconds(1.5f);
+        if (GameManager.instance != null) {
+            GameManager.instance.AkhiriHari();
+        }
     }
 }

@@ -1,12 +1,20 @@
 using UnityEngine;
+using System;
 using System.Collections;
 using System.Collections.Generic;
+
+[System.Serializable]
+public class DataMenuNasi {
+    public string kodeMenu;
+    public Sprite gambarPesanan;
+}
 
 public class Customer : MonoBehaviour {
     public List<string> daftarPesanan = new List<string>(); 
     public float kesabaran = 25f; 
-    
-    public string[] semuaMenuNasi = { "Isian_AyamPedas", "Isian_SuwirKecap", "Isian_AyamRica" };
+
+    [Header("Daftar Semua Menu Nasi (Urutan = Urutan Unlock Hari)")]
+    public List<DataMenuNasi> daftarMenuNasi = new List<DataMenuNasi>();
 
     [HideInInspector] public CustomerSpawner spawner;
     [HideInInspector] public int slotIndex;
@@ -20,10 +28,14 @@ public class Customer : MonoBehaviour {
     public GameObject bubbleObject; 
     public SpriteRenderer pesananIconRenderer;  
     public SpriteRenderer pesananIconRenderer2; 
-    public Sprite gambarAyamRica;
-    public Sprite gambarAyamPedas;
-    public Sprite gambarSuwirAyam;
     public Sprite gambarAirMineral; 
+
+    [Header("Bar Kesabaran Mulus")]
+    public SpriteRenderer barKesabaran;
+    public Color warnaHijau = new Color(0.09f, 0.51f, 0.18f);
+    public Color warnaKuning = new Color(0.83f, 0.75f, 0.14f);
+    public Color warnaOren = new Color(0.85f, 0.42f, 0.15f);
+    public Color warnaMerah = new Color(0.85f, 0.22f, 0.16f);
 
     [Header("Ekspresi Emosi")]
     public Sprite ekspresiNormal;   
@@ -43,21 +55,30 @@ public class Customer : MonoBehaviour {
     private bool sedangReaksi = false; 
     private int totalHargaPokok = 0;
 
-    // VARIABEL BARU UNTUK POSISI TENGAH BALON
     private Vector3 posisiAwalIkon1;
-    private float posisiTengahX;
+    private Vector3 posisiTengahIkon;
+
+    private Vector3 skalaAwalBar;
+    private Vector3 posisiAwalBar;
+    private float tinggiSpriteBar;
 
     void Start() {
         waktuTunggu = kesabaran;
         basePosition = transform.position;
         karakterRenderer = GetComponent<SpriteRenderer>();
         
-        // MENGHITUNG TITIK TENGAH SECARA OTOMATIS
         if (pesananIconRenderer != null) posisiAwalIkon1 = pesananIconRenderer.transform.localPosition;
         if (pesananIconRenderer != null && pesananIconRenderer2 != null) {
-            posisiTengahX = (pesananIconRenderer.transform.localPosition.x + pesananIconRenderer2.transform.localPosition.x) / 2f;
+            posisiTengahIkon = (pesananIconRenderer.transform.localPosition + pesananIconRenderer2.transform.localPosition) / 2f;
         } else if (pesananIconRenderer != null) {
-            posisiTengahX = 0f;
+            posisiTengahIkon = posisiAwalIkon1;
+        }
+
+        if (barKesabaran != null) {
+            skalaAwalBar = barKesabaran.transform.localScale;
+            posisiAwalBar = barKesabaran.transform.localPosition;
+            tinggiSpriteBar = barKesabaran.sprite != null ? barKesabaran.sprite.bounds.size.y : 1f;
+            barKesabaran.color = warnaHijau;
         }
 
         if (bubbleObject != null) bubbleObject.SetActive(false);
@@ -71,8 +92,13 @@ public class Customer : MonoBehaviour {
         daftarPesanan.Clear();
         totalHargaPokok = 0;
 
+        if (daftarMenuNasi == null || daftarMenuNasi.Count == 0) {
+            Debug.LogWarning("[Customer] Daftar Menu Nasi masih kosong di Inspector!");
+            return;
+        }
+
         int maxItem = 1;
-        int varianTerbuka = 3;
+        int varianTerbuka = daftarMenuNasi.Count;
         bool bolehMinum = false;
         int hargaNasi = 10000;
         int hargaMinum = 4000;
@@ -80,24 +106,24 @@ public class Customer : MonoBehaviour {
         if (GameManager.instance != null) {
             PengaturanHari hari = GameManager.instance.AmbilHariIni();
             maxItem = hari.maxItemPerPesanan;
-            varianTerbuka = Mathf.Clamp(hari.jumlahVarianNasiTerbuka, 1, semuaMenuNasi.Length);
+            varianTerbuka = Mathf.Clamp(hari.jumlahVarianNasiTerbuka, 1, daftarMenuNasi.Count);
             bolehMinum = hari.airMineralTerbuka;
             hargaNasi = GameManager.instance.hargaNasiCokot;
             hargaMinum = GameManager.instance.hargaAirMineral;
         }
 
-        int jumlahPesanan = Random.Range(1, maxItem + 1);
+        int jumlahPesanan = UnityEngine.Random.Range(1, maxItem + 1);
 
-        string nasi1 = semuaMenuNasi[Random.Range(0, varianTerbuka)];
+        string nasi1 = daftarMenuNasi[UnityEngine.Random.Range(0, varianTerbuka)].kodeMenu.Trim();
         daftarPesanan.Add(nasi1);
         totalHargaPokok += hargaNasi;
 
         if (jumlahPesanan > 1) {
-            if (bolehMinum && Random.value > 0.5f) {
+            if (bolehMinum && UnityEngine.Random.value > 0.5f) {
                 daftarPesanan.Add("Minum_Air");
                 totalHargaPokok += hargaMinum;
             } else {
-                string nasi2 = semuaMenuNasi[Random.Range(0, varianTerbuka)];
+                string nasi2 = daftarMenuNasi[UnityEngine.Random.Range(0, varianTerbuka)].kodeMenu.Trim();
                 daftarPesanan.Add(nasi2);
                 totalHargaPokok += hargaNasi;
             }
@@ -110,11 +136,10 @@ public class Customer : MonoBehaviour {
                 pesananIconRenderer.gameObject.SetActive(true);
                 pesananIconRenderer.sprite = AmbilGambarMenu(daftarPesanan[0]);
 
-                // LOGIKA CERDAS: Kalau pesanan sisa 1, geser ikon ke titik tengah balon!
                 if (daftarPesanan.Count == 1) {
-                    pesananIconRenderer.transform.localPosition = new Vector3(posisiTengahX, posisiAwalIkon1.y, posisiAwalIkon1.z);
+                    pesananIconRenderer.transform.localPosition = posisiTengahIkon;
                 } else {
-                    pesananIconRenderer.transform.localPosition = posisiAwalIkon1; // Kembalikan ke kiri
+                    pesananIconRenderer.transform.localPosition = posisiAwalIkon1;
                 }
             } else {
                 pesananIconRenderer.gameObject.SetActive(false);
@@ -131,12 +156,53 @@ public class Customer : MonoBehaviour {
         }
     }
 
+    void UpdateBarKesabaran(float rasioWaktu) {
+        if (barKesabaran == null) return;
+
+        float rasio = Mathf.Clamp01(rasioWaktu);
+
+        float skalaYBaru = skalaAwalBar.y * rasio;
+        barKesabaran.transform.localScale = new Vector3(skalaAwalBar.x, skalaYBaru, skalaAwalBar.z);
+
+        float pergeseranY = (tinggiSpriteBar * skalaAwalBar.y * (1f - rasio)) / 2f;
+        barKesabaran.transform.localPosition = new Vector3(posisiAwalBar.x, posisiAwalBar.y - pergeseranY, posisiAwalBar.z);
+
+        if (rasio > 0.5f) {
+            barKesabaran.color = Color.Lerp(warnaKuning, warnaHijau, (rasio - 0.5f) * 2f);
+        } else if (rasio > 0.25f) {
+            barKesabaran.color = Color.Lerp(warnaOren, warnaKuning, (rasio - 0.25f) * 4f);
+        } else {
+            barKesabaran.color = Color.Lerp(warnaMerah, warnaOren, rasio * 4f);
+        }
+    }
+
     Sprite AmbilGambarMenu(string kodeMenu) {
-        if (kodeMenu.Contains("Rica")) return gambarAyamRica;
-        if (kodeMenu.Contains("Pedas") || kodeMenu.Contains("AsamManis")) return gambarAyamPedas;
-        if (kodeMenu.Contains("Kecap") || kodeMenu.Contains("SuwirAyam") || kodeMenu.Contains("SuwirKecap")) return gambarSuwirAyam;
-        if (kodeMenu.Contains("Air") || kodeMenu.Contains("Minum")) return gambarAirMineral;
+        if (string.IsNullOrEmpty(kodeMenu)) return null;
+        string kodeBersih = kodeMenu.Trim();
+
+        if (kodeBersih.IndexOf("Air", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            kodeBersih.IndexOf("Minum", StringComparison.OrdinalIgnoreCase) >= 0) {
+            return gambarAirMineral;
+        }
+
+        foreach (DataMenuNasi menu in daftarMenuNasi) {
+            if (menu.kodeMenu != null && menu.kodeMenu.Trim().Equals(kodeBersih, StringComparison.OrdinalIgnoreCase)) {
+                return menu.gambarPesanan;
+            }
+        }
         return null;
+    }
+
+    int CariIndexPesanan(string itemDiberikan) {
+        if (string.IsNullOrEmpty(itemDiberikan)) return -1;
+        string itemBersih = itemDiberikan.Trim();
+
+        for (int i = 0; i < daftarPesanan.Count; i++) {
+            if (daftarPesanan[i].Trim().Equals(itemBersih, StringComparison.OrdinalIgnoreCase)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     void Update() {
@@ -156,6 +222,8 @@ public class Customer : MonoBehaviour {
         else {
             waktuTunggu -= Time.deltaTime;
             float rasioWaktu = waktuTunggu / kesabaran;
+
+            UpdateBarKesabaran(rasioWaktu);
             
             if (rasioWaktu > 0.5f) {
                 if (ekspresiNormal != null) karakterRenderer.sprite = ekspresiNormal;
@@ -168,12 +236,12 @@ public class Customer : MonoBehaviour {
             else {
                 if (ekspresiMarah != null) karakterRenderer.sprite = ekspresiMarah;
                 karakterRenderer.color = new Color(1f, 0.6f, 0.6f); 
-                transform.position = new Vector3(targetPosisi.x + Random.Range(-0.02f, 0.02f), targetPosisi.y, targetPosisi.z);
+                transform.position = new Vector3(targetPosisi.x + UnityEngine.Random.Range(-0.02f, 0.02f), targetPosisi.y, targetPosisi.z);
             }
 
             if (waktuTunggu <= 0) {
                 if (asetTeksMarah.Length > 0) {
-                    MunculkanTeks(asetTeksMarah[Random.Range(0, asetTeksMarah.Length)], false);
+                    MunculkanTeks(asetTeksMarah[UnityEngine.Random.Range(0, asetTeksMarah.Length)], false);
                 }
                 StartCoroutine(ReactAndLeave(false)); 
             }
@@ -183,20 +251,21 @@ public class Customer : MonoBehaviour {
     public void TerimaPesanan(string itemDiberikan) {
         if (!sudahSampai || sedangReaksi) return; 
 
-        if (daftarPesanan.Contains(itemDiberikan)) {
-            daftarPesanan.Remove(itemDiberikan); 
+        int indexCocok = CariIndexPesanan(itemDiberikan);
+        if (indexCocok != -1) {
+            daftarPesanan.RemoveAt(indexCocok); 
             UpdateIkonBalon(); 
 
             if (daftarPesanan.Count == 0) {
                 HitungBayaranDanTip();
-                if (asetTeksBenar.Length > 0) MunculkanTeks(asetTeksBenar[Random.Range(0, asetTeksBenar.Length)], true);
+                if (asetTeksBenar.Length > 0) MunculkanTeks(asetTeksBenar[UnityEngine.Random.Range(0, asetTeksBenar.Length)], true);
                 StartCoroutine(ReactAndLeave(true));
             } else {
                 StartCoroutine(LompatKecil());
             }
         } 
         else {
-            if (asetTeksSalah.Length > 0) MunculkanTeks(asetTeksSalah[Random.Range(0, asetTeksSalah.Length)], false);
+            if (asetTeksSalah.Length > 0) MunculkanTeks(asetTeksSalah[UnityEngine.Random.Range(0, asetTeksSalah.Length)], false);
             StartCoroutine(ReactAndLeave(false)); 
         }
     }
@@ -205,10 +274,11 @@ public class Customer : MonoBehaviour {
         if (!sudahSampai || sedangReaksi) return;
 
         foreach (string item in isiKantong) {
-            if (daftarPesanan.Contains(item)) {
-                daftarPesanan.Remove(item);
+            int indexCocok = CariIndexPesanan(item);
+            if (indexCocok != -1) {
+                daftarPesanan.RemoveAt(indexCocok);
             } else {
-                if (asetTeksSalah.Length > 0) MunculkanTeks(asetTeksSalah[Random.Range(0, asetTeksSalah.Length)], false);
+                if (asetTeksSalah.Length > 0) MunculkanTeks(asetTeksSalah[UnityEngine.Random.Range(0, asetTeksSalah.Length)], false);
                 StartCoroutine(ReactAndLeave(false));
                 return;
             }
@@ -218,7 +288,7 @@ public class Customer : MonoBehaviour {
 
         if (daftarPesanan.Count == 0) {
             HitungBayaranDanTip();
-            if (asetTeksBenar.Length > 0) MunculkanTeks(asetTeksBenar[Random.Range(0, asetTeksBenar.Length)], true);
+            if (asetTeksBenar.Length > 0) MunculkanTeks(asetTeksBenar[UnityEngine.Random.Range(0, asetTeksBenar.Length)], true);
             StartCoroutine(ReactAndLeave(true));
         } else {
             StartCoroutine(LompatKecil());
@@ -277,7 +347,7 @@ public class Customer : MonoBehaviour {
             karakterRenderer.color = new Color(1f, 0.5f, 0.5f); 
             while (timer < 0.3f) {
                 timer += Time.deltaTime;
-                transform.position = posisiAwal + new Vector3(Random.Range(-0.1f, 0.1f), 0, 0);
+                transform.position = posisiAwal + new Vector3(UnityEngine.Random.Range(-0.1f, 0.1f), 0, 0);
                 yield return null;
             }
         }

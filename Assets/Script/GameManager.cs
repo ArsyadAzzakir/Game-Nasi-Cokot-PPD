@@ -1,159 +1,182 @@
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 using TMPro;
+using System.Collections.Generic;
 
 [System.Serializable]
 public class PengaturanHari {
     public string namaHari = "Hari 1";
-    public float batasWaktu = 60f;          // Waktu shift (detik)
-    public int targetPelanggan = 3;         // Syarat Bintang 1
-    public int targetUang = 30000;          // Syarat Bintang 2
-    public float targetWaktuSisa = 10f;     // Syarat Bintang 3 (Selesai sebelum waktu habis / sisa waktu minimal)
+    [Header("Target & Kuota Pelanggan")]
+    public int targetPelanggan = 6;
+    public int kelebihanPelanggan = 7; // Total datang = target + kelebihan
+    public int targetUangHarian = 60000;
+
+    [Header("Pengaturan Menu & Ritme")]
+    public int maxPelangganBersamaan = 1; 
+    public int jumlahVarianNasiTerbuka = 3;
+    public int maxItemPerPesanan = 1;
+    public bool airMineralTerbuka = false;
+    public float jedaSpawnPelanggan = 3.5f;
+    public float kesabaranPelanggan = 25f;
+
+    public int TotalPelangganDatang => targetPelanggan + kelebihanPelanggan;
     
-    [Header("Tingkat Kesulitan Hari Ini")]
-    public int maxPelangganBersamaan = 1;   // Hari 1 cuma 1 pelanggan di meja!
-    public int maxItemPerPesanan = 1;       // Hari 1 pesan 1 barang, Hari lanjut bisa 2 barang
-    public int jumlahVarianNasiTerbuka = 1; // 1 = AsamManis, 2 = +Kecap, 3 = +Rica
-    public bool airMineralTerbuka = false;  // Apakah pelanggan sudah boleh pesan minum?
 }
 
 public class GameManager : MonoBehaviour {
-    public static GameManager instance; // Memudahkan script lain mengakses GameManager
+    public static GameManager instance;
+    public static int indexHariAktif = 0; // Menyimpan progres hari saat scene di-reload
 
-    [Header("Status Permainan Saat Ini")]
-    public int indexHariSekarang = 0; // 0 = Hari 1, 1 = Hari 2, dst (sampai 6 = Hari 7)
-    public int uangHariIni = 0;
-    public int pelangganTerlayani = 0;
-    public float sisaWaktu;
-    public bool shiftAktif = false;
+    [Header("Debug / Tes Hari Tertentu")]
+    [Tooltip("Set 1-7 untuk langsung tes hari tertentu, set 0 untuk jalan normal dari Hari 1")]
+    public int tesMulaiDariHari = 0;
 
-    [Header("Harga & Tip (Rupiah)")]
+    [Header("Harga & Tip")]
     public int hargaNasiCokot = 10000;
     public int hargaAirMineral = 4000;
-    public int maksimalTipPerPelanggan = 5000;
+    public int maksimalTipPerPelanggan = 3000;
 
-    [Header("Gembok & Aset Meja (Opsional)")]
-    public GameObject[] objekGembokVarian; // Masukkan gambar gembok di atas kotak isian
-    public GameObject tumpukanBotolAir;    // Masukkan objek bottle stack di meja
+    [Header("Pengaturan Hari 1 - 7")]
+    public List<PengaturanHari> daftarHari = new List<PengaturanHari>();
 
-    [Header("UI Text (Opsional - Bisa Diisi Nanti)")]
-    public TextMeshProUGUI teksUang;
-    public TextMeshProUGUI teksWaktu;
-    public TextMeshProUGUI teksTargetPelanggan;
-    public TextMeshProUGUI teksHari;
+    [Header("UI HUD Target Harian")]
+    public TMP_Text teksSisaPelanggan;     // Angka sisa target di kotak ikon 3 orang
+    public Image fillBarTargetUang;        // Bar pengisi di dalam kotak coklat gelap
+    public TMP_Text teksProgressUang;      // Opsional: "Rp 40.000 / Rp 60.000"
+    public TMP_Text teksNamaHari;          // Opsional: "Hari 1"
+    public float kecepatanAnimasiBar = 5f;
 
-    [Header("Konfigurasi 7 Hari")]
-    public PengaturanHari[] daftarHari = new PengaturanHari[7];
+    [Header("Panel Evaluasi Akhir Hari (Opsional)")]
+    public GameObject panelAkhirHari;
+    public TMP_Text teksStatusHari;
+    public TMP_Text teksRingkasanHari;
+
+    // Status berjalan hari ini
+    private int pelangganBerhasil = 0;
+    private int uangHariIni = 0;
+    private float targetFillBar = 0f;
+    private bool hariSudahSelesai = false;
+
+    void Reset() {
+        InisialisasiDefault7Hari();
+    }
 
     void Awake() {
-        if (instance == null) instance = this;
-        else Destroy(gameObject);
+        instance = this;
 
-        IsiDefault7Hari();
+        if (daftarHari == null || daftarHari.Count == 0) {
+            InisialisasiDefault7Hari();
+        }
+
+        if (tesMulaiDariHari >= 1 && tesMulaiDariHari <= daftarHari.Count) {
+            indexHariAktif = tesMulaiDariHari - 1;
+        }
+        indexHariAktif = Mathf.Clamp(indexHariAktif, 0, daftarHari.Count - 1);
     }
 
     void Start() {
-        MulaiHari(indexHariSekarang);
+        pelangganBerhasil = 0;
+        uangHariIni = 0;
+        targetFillBar = 0f;
+        hariSudahSelesai = false;
+
+        if (fillBarTargetUang != null) fillBarTargetUang.fillAmount = 0f;
+        if (panelAkhirHari != null) panelAkhirHari.SetActive(false);
+
+        UpdateTampilanHUD();
     }
 
     void Update() {
-        if (!shiftAktif) return;
-
-        sisaWaktu -= Time.deltaTime;
-        UpdateUI();
-
-        if (sisaWaktu <= 0) {
-            sisaWaktu = 0;
-            AkhiriHari();
+        // Animasi pergerakan bar uang harian agar naik mulus
+        if (fillBarTargetUang != null) {
+            fillBarTargetUang.fillAmount = Mathf.Lerp(
+                fillBarTargetUang.fillAmount,
+                targetFillBar,
+                Time.deltaTime * kecepatanAnimasiBar
+            );
         }
     }
 
-    public void MulaiHari(int indexHari) {
-        indexHariSekarang = Mathf.Clamp(indexHari, 0, daftarHari.Length - 1);
-        PengaturanHari hari = AmbilHariIni();
-
-        uangHariIni = 0;
-        pelangganTerlayani = 0;
-        sisaWaktu = hari.batasWaktu;
-        shiftAktif = true;
-
-        // Atur visibilitas tumpukan botol air sesuai hari
-        if (tumpukanBotolAir != null) {
-            tumpukanBotolAir.SetActive(hari.airMineralTerbuka);
-        }
-
-        // Atur gembok varian isian
-        for (int i = 0; i < objekGembokVarian.Length; i++) {
-            if (objekGembokVarian[i] != null) {
-                // Jika index di bawah jumlah varian terbuka, sembunyikan gemboknya
-                objekGembokVarian[i].SetActive(i >= hari.jumlahVarianNasiTerbuka);
-            }
-        }
-
-        UpdateUI();
-        Debug.Log("=== MULAI " + hari.namaHari + " ===");
+    void InisialisasiDefault7Hari() {
+        daftarHari = new List<PengaturanHari> {
+            new PengaturanHari { namaHari = "Hari 1", targetPelanggan = 6,  kelebihanPelanggan = 7, targetUangHarian = 60000,  jumlahVarianNasiTerbuka = 3, maxItemPerPesanan = 1, airMineralTerbuka = false, jedaSpawnPelanggan = 3.5f, kesabaranPelanggan = 28f },
+            new PengaturanHari { namaHari = "Hari 2", targetPelanggan = 8,  kelebihanPelanggan = 6, targetUangHarian = 90000,  jumlahVarianNasiTerbuka = 3, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 3.2f, kesabaranPelanggan = 26f },
+            new PengaturanHari { namaHari = "Hari 3", targetPelanggan = 10, kelebihanPelanggan = 5, targetUangHarian = 120000, jumlahVarianNasiTerbuka = 4, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 3.0f, kesabaranPelanggan = 25f },
+            new PengaturanHari { namaHari = "Hari 4", targetPelanggan = 12, kelebihanPelanggan = 4, targetUangHarian = 150000, jumlahVarianNasiTerbuka = 5, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 2.8f, kesabaranPelanggan = 24f },
+            new PengaturanHari { namaHari = "Hari 5", targetPelanggan = 14, kelebihanPelanggan = 3, targetUangHarian = 180000, jumlahVarianNasiTerbuka = 6, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 2.6f, kesabaranPelanggan = 23f },
+            new PengaturanHari { namaHari = "Hari 6", targetPelanggan = 16, kelebihanPelanggan = 2, targetUangHarian = 210000, jumlahVarianNasiTerbuka = 6, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 2.4f, kesabaranPelanggan = 22f },
+            new PengaturanHari { namaHari = "Hari 7", targetPelanggan = 18, kelebihanPelanggan = 1, targetUangHarian = 250000, jumlahVarianNasiTerbuka = 6, maxItemPerPesanan = 2, airMineralTerbuka = true,  jedaSpawnPelanggan = 2.2f, kesabaranPelanggan = 20f }
+        };
     }
 
     public PengaturanHari AmbilHariIni() {
-        return daftarHari[indexHariSekarang];
+        return daftarHari[Mathf.Clamp(indexHariAktif, 0, daftarHari.Count - 1)];
     }
 
-    public void CatatPesananSelesai(int bayaranPokok, int uangTip) {
-        if (!shiftAktif) return;
+    public void CatatPesananSelesai(int hargaPokok, int uangTip) {
+        if (hariSudahSelesai) return;
 
-        int totalDiterima = bayaranPokok + uangTip;
-        uangHariIni += totalDiterima;
-        pelangganTerlayani++;
+        pelangganBerhasil++;
+        uangHariIni += (hargaPokok + uangTip);
+        UpdateTampilanHUD();
+    }
 
-        Debug.Log($"Transaksi Sukses! Pokok: Rp{bayaranPokok} + Tip Cepat: Rp{uangTip} | Total Kas: Rp{uangHariIni}");
-        UpdateUI();
-
-        // Cek apakah target pelanggan & uang sudah tembus lebih cepat untuk klaim Bintang 3
+    void UpdateTampilanHUD() {
         PengaturanHari hari = AmbilHariIni();
-        if (pelangganTerlayani >= hari.targetPelanggan && uangHariIni >= hari.targetUang) {
-            Debug.Log("Target Harian Tercapai Lebih Awal! Sisa Waktu: " + Mathf.CeilToInt(sisaWaktu) + " detik.");
+
+        // Sisa pelanggan terus berkurang saat berhasil melayani (berhenti di 0)
+        int sisaTarget = Mathf.Max(0, hari.targetPelanggan - pelangganBerhasil);
+        if (teksSisaPelanggan != null) {
+            teksSisaPelanggan.text = sisaTarget.ToString();
+        }
+
+        // Hitung rasio bar target harian (0.0 sampai 1.0)
+        targetFillBar = hari.targetUangHarian > 0
+            ? Mathf.Clamp01((float)uangHariIni / hari.targetUangHarian)
+            : 1f;
+
+        if (teksProgressUang != null) {
+            teksProgressUang.text = $"Rp {uangHariIni:N0} / Rp {hari.targetUangHarian:N0}";
+        }
+
+        if (teksNamaHari != null) {
+            teksNamaHari.text = hari.namaHari;
         }
     }
 
-    void AkhiriHari() {
-        shiftAktif = false;
+    public void AkhiriHari() {
+        if (hariSudahSelesai) return;
+        hariSudahSelesai = true;
+
         PengaturanHari hari = AmbilHariIni();
+        bool lulusTarget = pelangganBerhasil >= hari.targetPelanggan && uangHariIni >= hari.targetUangHarian;
 
-        bool bintang1 = pelangganTerlayani >= hari.targetPelanggan;
-        bool bintang2 = uangHariIni >= hari.targetUang;
-        bool bintang3 = bintang1 && bintang2 && (sisaWaktu >= hari.targetWaktuSisa);
+        Debug.Log($"[{hari.namaHari} SELESAI] Dilayani: {pelangganBerhasil}/{hari.targetPelanggan} | Uang: Rp {uangHariIni:N0}/Rp {hari.targetUangHarian:N0} | Lulus: {lulusTarget}");
 
-        int totalBintang = (bintang1 ? 1 : 0) + (bintang2 ? 1 : 0) + (bintang3 ? 1 : 0);
-
-        Debug.Log($"=== {hari.namaHari} SELESAI! ===");
-        Debug.Log($"Pelanggan: {pelangganTerlayani}/{hari.targetPelanggan} | Uang: Rp{uangHariIni}/Rp{hari.targetUang}");
-        Debug.Log($"Perolehan Bintang: {totalBintang} Bintang!");
-    }
-
-    void UpdateUI() {
-        PengaturanHari hari = AmbilHariIni();
-        if (teksUang != null) teksUang.text = "Rp " + uangHariIni.ToString("N0");
-        if (teksWaktu != null) teksWaktu.text = Mathf.CeilToInt(sisaWaktu).ToString() + "s";
-        if (teksTargetPelanggan != null) teksTargetPelanggan.text = pelangganTerlayani + "/" + hari.targetPelanggan;
-        if (teksHari != null) teksHari.text = hari.namaHari;
-    }
-
-    // Mengisi nilai awal 7 hari otomatis jika belum diatur di Inspector
-    void IsiDefault7Hari() {
-        if (daftarHari == null || daftarHari.Length != 7) daftarHari = new PengaturanHari[7];
-        
-        for (int i = 0; i < 7; i++) {
-            if (daftarHari[i] == null) daftarHari[i] = new PengaturanHari();
-            daftarHari[i].namaHari = "Hari " + (i + 1);
-            daftarHari[i].batasWaktu = 60f + (i * 15f); // Waktu makin panjang karena pesanan makin banyak
-            daftarHari[i].targetPelanggan = 3 + (i * 2); // Hari 1: 3 orang, Hari 2: 5 orang, dst
-            daftarHari[i].targetUang = daftarHari[i].targetPelanggan * 12000;
-            daftarHari[i].targetWaktuSisa = 5f;
-
-            // Pengaturan Kesulitan Bertahap:
-            daftarHari[i].maxPelangganBersamaan = (i == 0) ? 1 : (i < 3 ? 2 : 3); // Hari 1 cuma 1 pelanggan!
-            daftarHari[i].maxItemPerPesanan = (i == 0) ? 1 : 2; // Mulai Hari 2 bisa pesan 2 barang
-            daftarHari[i].jumlahVarianNasiTerbuka = (i == 0) ? 1 : (i == 1 ? 2 : 3);
-            daftarHari[i].airMineralTerbuka = (i >= 1); // Air mineral buka mulai Hari 2
+        if (panelAkhirHari != null) {
+            panelAkhirHari.SetActive(true);
+            if (teksStatusHari != null) {
+                teksStatusHari.text = lulusTarget ? $"{hari.namaHari} Berhasil!" : $"{hari.namaHari} Gagal!";
+            }
+            if (teksRingkasanHari != null) {
+                teksRingkasanHari.text = $"Pelanggan: {pelangganBerhasil} / {hari.targetPelanggan}\nPendapatan: Rp {uangHariIni:N0} / Rp {hari.targetUangHarian:N0}";
+            }
         }
+    }
+
+    public void LanjutHariBerikutnya() {
+        tesMulaiDariHari = 0;
+        if (indexHariAktif < daftarHari.Count - 1) {
+            indexHariAktif++;
+        } else {
+            indexHariAktif = 0; // Kembali ke Hari 1 setelah tamat Hari 7
+        }
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public void UlangiHari() {
+        tesMulaiDariHari = 0;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 }
